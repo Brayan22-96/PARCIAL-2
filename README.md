@@ -1,76 +1,130 @@
 # PARCIAL-2
 
-## Diferencia entre NetFlow y sFlow
-Diferencia FundamentalNetFlow (Cisco): Es un protocolo basado en el estado de los flujos. El router examina todos los paquetes que pasan y los agrupa en "flujos" (basados en IP origen/destino, puertos, etc.). Consume más CPU y memoria porque mantiene una tabla de flujos activa en el dispositivo.sFlow (Flujo muestreado): Es un protocolo de muestreo estadístico. No analiza todos los paquetes ni mantiene estados; simplemente toma uno de cada $N$ paquetes (por ejemplo, 1 de cada 1000) y envía la cabecera directamente al colector. Es mucho más ligero para el hardware.Escenario de 100 GbpsPara detectar "top talkers" en un enlace de 100 Gbps, elegiría sFlow. A esas velocidades tan altas, procesar cada paquete para actualizar una tabla de flujos (NetFlow) podría saturar el plano de control (CPU) del router o switch. sFlow permite tener visibilidad del tráfico masivo con un impacto mínimo en el rendimiento del equipo.
+### Diferencia entre NetFlow y sFlow + escenario de uso
 
-## La 5-tuple de NetFlow y Medición por Aplicación
-Los 5 campos que definen un flujo único son:
+La diferencia fundamental entre NetFlow y sFlow radica en la forma en que recolectan la información del tráfico de red.
 
-IP de Origen
+NetFlow realiza un análisis completo de los flujos, registrando información detallada de cada conexión (basado en la 5-tupla: IP origen, IP destino, puerto origen, puerto destino y protocolo). Esto permite obtener métricas precisas como número de paquetes, bytes transmitidos y duración del flujo. Sin embargo, este nivel de detalle implica un mayor consumo de CPU y memoria en el dispositivo de red.
 
-IP de Destino
+Por otro lado, sFlow utiliza un método de muestreo estadístico, donde solo se analiza un subconjunto de los paquetes que circulan por la red. Esto reduce significativamente la carga en el dispositivo, pero a costa de perder precisión en los datos.
 
-Puerto de Origen
+En un enlace de 100 Gbps, elegiría sFlow sobre NetFlow para detectar “top talkers”, ya que:
 
-Puerto de Destino
+- Permite escalar mejor en enlaces de alta velocidad.
+- Reduce la sobrecarga en el router o switch.
+- Proporciona una visión suficientemente representativa del tráfico para identificar los principales generadores de datos.
 
-Protocolo de Capa 4 (TCP, UDP, ICMP, etc.)
+### Campos de la 5-tupla en NetFlow
 
-Identificación de aplicaciones:
-Si deseas medir el consumo por aplicación (HTTP vs. SSH), el colector debe inspeccionar los Puertos de Destino (y a veces los de origen).
+La 5-tupla en NetFlow está compuesta por los siguientes campos:
+- Dirección IP de origen
+- Dirección IP de destino
+- Puerto de origen
+- Puerto de destino
+- Protocolo (TCP, UDP, ICMP, etc.)
 
-HTTP: Generalmente puerto 80 (o 443 para HTTPS).
+Si se desea medir el consumo de ancho de banda por aplicación (por ejemplo, distinguir entre HTTP y SSH), el collector debe inspeccionar principalmente:
 
-SHH: Puerto 22.
+Los puertos de origen y destino
 
-## Interpretación de IP Accounting
-Análisis de la Tabla
-De 192.168.1.10 a 10.0.0.5: Se han enviado 1500 paquetes (120.000 Bytes).
+Esto se debe a que muchas aplicaciones utilizan puertos bien conocidos, por ejemplo:
 
-De 10.0.0.5 a 192.168.1.10: Se han recibido solo 50 paquetes (4.000 Bytes).
+- HTTP → puerto 80
+- HTTPS → puerto 443
+- SSH → puerto 22
 
-Interpretación de la Asimetría Extrema
-Una asimetría tan marcada (muchos paquetes saliendo y casi ninguno regresando) suele indicar tres posibles escenarios:
+### Interpretación de los datos (IP Accounting)
 
-Tráfico Unidireccional Masivo: El host está realizando un respaldo de datos o una carga (upload) hacia el servidor, y solo recibe ACKs (confirmaciones) de vuelta.192.168.1.10
+Dada la tabla:
 
-Ataque de Denegación de Servicio (DoS): El host podría estar realizando un escaneo de puertos o un ataque de inundación (Flooding) contra la IP .10.0.0.5
+| Source        | Destination   | Packets | Bytes  |
+|---------------|--------------|--------:|-------:|
+| 192.168.1.10  | 10.0.0.5     | 1500    | 120000 |
+| 192.168.1.10  | 10.0.0.8     | 800     | 64000  |
+| 10.0.0.5      | 192.168.1.10 | 50      | 4000   |
 
-Enrutamiento Asimétrico: Los paquetes de ida pasan por este router, pero los paquetes de regreso están tomando una ruta física distinta, por lo que el router no los contabiliza.
+Se observa que:
 
-| Source | Destination | Packets | Bytes |
-| :--- | :--- | :--- | :--- |
-| 192.168.1.10 | 10.0.0.5 | 1500 | 120000 |
-| 10.0.0.5 | 192.168.1.10 | 50 | 4000 |
+- Desde 192.168.1.10 hacia 10.0.0.5 hay 1500 paquetes, mientras que en sentido contrario solo hay 50 paquetes.
+- Esto indica una asimetría extrema en el tráfico.
+
+Esto sugiere que:
+
+- 192.168.1.10 está enviando una gran cantidad de datos, pero recibe muy poca respuesta.
+- Puede tratarse de:
+- Tráfico tipo cliente → servidor (ej. subida de datos, streaming, backup)
+- Un posible envío masivo sin respuesta (ej. escaneo o intento de ataque)
+- Problemas de red (pérdida de paquetes o mala configuración)
+
+Conclusión:
+Existe una asimetría significativa en el flujo, donde el tráfico de salida es mucho mayor que el de retorno, lo cual podría indicar un comportamiento anómalo o una aplicación que genera tráfico unidireccional.
+
+## 2.b Arquitectura de Monitoreo – Estación de Trenes
+
+### Descripción general
+Se diseña una arquitectura distribuida basada en contenedores Docker, donde cada cámara ejecuta un modelo YOLO especializado. Los resultados (video y metadata) se envían a servidores centrales redundantes, garantizando alta disponibilidad, calidad de servicio (QoS) y monitoreo mediante NetFlow/IP Accounting.
+
+### Componentes de la arquitectura
+Contenedores (Docker)
+
+Cada uno en la red 10.0.0.0/24:
+
+| Contenedor | Función                          | IP         |
+|------------|----------------------------------|------------|
+| C1         | YOLO + OCR (placas)              | 10.0.0.11  |
+| C2         | Conteo de parqueadero            | 10.0.0.12  |
+| C3         | Detección de personas            | 10.0.0.13  |
+| C4         | Detección de animales            | 10.0.0.14  |
+| C5         | Objetos perdidos (maletas, etc.) | 10.0.0.15  |
+
+### Máquinas Virtuales
+| VM   | Función                | IP         |
+|------|----------------------|------------|
+| VM1  | Colector principal   | 10.0.0.100 |
+| VM2  | Respaldo redundante  | 10.0.0.101 |
+
+### Red y Conectividad
+- Switch virtual: Open vSwitch o Linux Bridge  
+- Enlaces redundantes hacia VM1 y VM2  
+- Subred: 10.0.0.0/24  
+- Fuente de video: RTSP (cámaras o archivos)
+<img width="2730" height="768" alt="mermaid-diagram (2)" src="https://github.com/user-attachments/assets/8ce256fb-9bac-453c-8511-b73364a37781" />
+
+### Tipo de Tráfico
+| Tipo de dato | Protocolo | Motivo                    |
+|--------------|----------|---------------------------|
+| Video        | UDP      | Baja latencia             |
+| Metadata     | TCP      | Entrega confiable         |
+
+### Throughput por Contenedor
+| Tipo       | Cálculo                        | Resultado |
+|------------|--------------------------------|----------|
+| Video      | 30 fps × 50 KB × 8             | 12 Mbps  |
+| Metadata   | 200 bytes × 10 × 8             | 0.016 Mbps |
+| **Total**  | Video + Metadata               | 12.016 Mbps |
+
+### Throughput Total (Sistema)
+| Elemento        | Valor        |
+|----------------|-------------|
+| Contenedores   | 5           |
+| Total sistema  | ≈ 60.08 Mbps |
+
+### Ejemplo de 5-Tuple (NetFlow)
+| Campo        | Valor        |
+|--------------|-------------|
+| IP origen    | 10.0.0.11   |
+| IP destino   | 10.0.0.100  |
+| Puerto origen| 5000        |
+| Puerto destino| 9000       |
+| Protocolo    | UDP         |
+
+### IP Accounting (Monitoreo)
+iptables -L -v -n
+- Permite identificar qué IP (contenedor) envía más tráfico observando la columna de bytes acumulados.
+
+### Jitter y Solución
+- Uso de jitter buffer en el receptor  
+- Sincronización por timestamps  
+- Aplicación de QoS para priorizar video
 
 
-graph TD
-    %% Nodo de Procesamiento
-    subgraph "NODO 1: CONTENEDOR (YOLOv8)"
-        A[Cámara / Video Stream] -->|Inferencia| B[Python Script]
-        B -->|JSON Over Network| C{eth0: 172.17.0.2}
-        
-        note1[<b>Comandos Clave:</b><br/>- docker build -t yolo-app .<br/>- docker run --net app-network]
-    end
-
-    %% Nodo de Red
-    subgraph "NODO 2: VM GATEWAY (softflowd)"
-        C --> D[Bridge Virtual: docker0]
-        D --> E{softflowd}
-        
-        E -->|NetFlow Export| F[Dest: 192.168.1.50:9995]
-        
-        note2[<b>Comandos Clave:</b><br/>- softflowd -i docker0 -n 192.168.1.50:9995<br/>- iptables -A FORWARD -c]
-    end
-
-    %% Nodo de Visualización
-    subgraph "NODO 3: DASHBOARD (Colab/Streamlit)"
-        F --> G[Colector de Flujos]
-        G --> H[Procesamiento con Pandas]
-        H --> I[Dashboard: Alta Visibilidad]
-        
-        note3[<b>Comandos Clave:</b><br/>- pip install streamlit ultralytics<br/>- streamlit run app.py]
-    end
-
-    %% Conexiones
-    C -.->|Muestreo| E
