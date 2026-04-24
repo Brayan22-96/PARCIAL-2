@@ -126,5 +126,3 @@ iptables -L -v -n
 - Uso de jitter buffer en el receptor  
 - Sincronización por timestamps  
 - Aplicación de QoS para priorizar video
-
-
