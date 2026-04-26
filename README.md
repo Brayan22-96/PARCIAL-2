@@ -1,5 +1,5 @@
 # PARCIAL-2
-
+## Estudiantes: Brayan Ivan Ribon Quintero y Edwar Roberto Martinez Pinto
 ### Diferencia entre NetFlow y sFlow + escenario de uso
 
 La diferencia fundamental entre NetFlow y sFlow radica en la forma en que recolectan la información del tráfico de red.
@@ -58,6 +58,38 @@ Esto sugiere que:
 
 Conclusión:
 Existe una asimetría significativa en el flujo, donde el tráfico de salida es mucho mayor que el de retorno, lo cual podría indicar un comportamiento anómalo o una aplicación que genera tráfico unidireccional.
+## 2.a Dearrollo de diagrama para la captura de video para validar si los trabajadores de una obra utilizan casco y chaleco reflectivo
+<img width="628" height="609" alt="image" src="https://github.com/user-attachments/assets/2a27477b-5a77-4489-a042-0a7eb98698e5" />
+
+
+<img width="600" height="623" alt="image" src="https://github.com/user-attachments/assets/16a095b1-2105-43c3-91a0-381b36ebb2a3" />
+
+
+<img width="657" height="123" alt="image" src="https://github.com/user-attachments/assets/354e25e1-7d97-4483-9fcf-60e90a86131d" />
+
+## 1. ¿Cómo comunicaría el contenedor YOLO con la VM para que el tráfico sea muestreado por NetFlow?
+Para que el tráfico sea visible por NetFlow, la VM debe actuar como un dispositivo  de paso bien sea un gatewayo router o como un puente de red que en este caso fue eth0. La forma más efectiva de comunicarlos es:
+
+Configuración de Red: Se establece la IP de la VM como la Puerta de Enlace Predeterminada  del contenedor Docker que se crea previamente.
+
+El Flujo del trafico: Cuando el script de YOLO envía los resultados de detección hacia el servidor final que es en Google Colab y los paquetes obligatoriamente deben atravesar la interfaz de red de la VM.
+
+Muestreo del trafico: Al pasar por la VM, la herramienta softflowd realiza una inspección pasiva del trafico pero sin  detiene el tráfico, sino que copia los metadatos de los paquetes (IPs, puertos, bytes) para generar el flujo de NetFlow, mientras el paquete original sigue su camino hacia el destino.
+## 2. Proponga una regla de IP Accounting en el router virtual (iptables o nftables)
+IP Accounting es fundamental para llevar un conteo exacto de cuántos bytes y paquetes se intercambian entre dos puntos específicos. Se propon un ejemplo  usando iptables, que es el estándar más común en sistemas Linux ligeros.
+## se asigna un subred al contenedor que vamos a usar: 
+Subred del contenedor: 172.17.0.0/24
+IP de la VM: 172.17.0.1
+Regla propuesta (iptables):
+Para medir el tráfico que entra desde el contenedor hacia la VM para ser procesado o reenviado, ejecutarías en la VM en la sesion de bash los siguientes comandos:
+# Contabilizar tráfico de subida (del contenedor a la VM)
+iptables -A FORWARD -s 172.17.0.0/24 -d 0.0.0.0/0 -j ACCEPT
+
+# Contabilizar tráfico de bajada (de la VM al contenedor)
+iptables -A FORWARD -s 0.0.0.0/0 -d 172.17.0.0/24 -j ACCEPT
+
+Para que sea visible se debe aplicar la regla  que está funcionando y  generara un contando, usas este comando para mostrar las estadísticas:
+iptables -L FORWARD -n -v
 
 ## 2.b Arquitectura de Monitoreo – Estación de Trenes
 
